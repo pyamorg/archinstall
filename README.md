@@ -35,10 +35,13 @@ duplicando los mismos archivos en dos sitios y desincronizándose.
    |
    v  abre una terminal (SUPER+Return por defecto) y entra a tu home
 04-post-install.sh     (usuario normal, tras 1er arranque)
-                        yay + AUR (wlogout, librewolf)
+                        yay + AUR (wlogout)
                         oh-my-zsh + zsh como shell por defecto
                         chezmoi init --apply <tu repo>  <- AQUÍ llega
-                        tu Hyprland/waybar/rofi/zsh REALES
+                        tu Hyprland/waybar/rofi/zsh REALES, y aquí
+                        mismo chezmoi te pregunta qué layout/variante
+                        de teclado usar (ver chezmoi.toml.tmpl en el
+                        repo de dotfiles)
                         dconf (modo oscuro)
 ```
 
@@ -48,6 +51,22 @@ sesión y vuelve a entrar) para que el escritorio tome toda tu config.
 `snap-now.sh` es independiente del flujo anterior: es un atajo para
 tomar un snapshot manual de snapper en cualquier momento
 (`./snap-now.sh "antes de tocar el kernel"`).
+
+## Configuración adicional que vive solo en el repo de chezmoi
+
+Estas piezas NO están en este repo (serían duplicación) — viven ya
+aplicadas en `pyamorg/dotfiles`:
+
+- **`.chezmoi.toml.tmpl`**: pregunta el layout/variante de teclado
+  (XKB) en cada `chezmoi init` nuevo, en vez de asumir un valor fijo
+  en `hyprland.conf`. Vacío en la pregunta de variante = qwerty
+  normal.
+- **`.chezmoiscripts/run_onchange_firefox-policies.sh`**: aplica
+  `/etc/firefox/policies/policies.json` (buscador, extensiones
+  forzadas, telemetría desactivada...) durante `chezmoi apply`.
+
+Si alguna vez arrancas un repo de dotfiles desde cero en otra máquina,
+recréalas ahí — no las copies de vuelta a este repo.
 
 ## Primera vez: el repo de dotfiles está vacío
 
@@ -99,7 +118,7 @@ A partir de aquí, cualquier instalación nueva que corra
 ## Editar los dotfiles después
 
 ```bash
-chezmoi edit ~/.config/hypr/hyprland.conf   # edita el archivo gestionado
+chezmoi edit ~/.config/hypr/hyprland.conf   # abre el .tmpl correspondiente
 chezmoi diff                                 # qué cambiaría al aplicar
 chezmoi apply                                # aplica al sistema real
 chezmoi cd && git add -A && git commit -m "..." && git push && exit

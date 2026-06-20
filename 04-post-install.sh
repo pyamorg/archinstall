@@ -42,7 +42,7 @@ if ! command -v yay &> /dev/null; then
     rm -rf "$tmpdir"
 fi
 
-yay -S --needed --noconfirm wlogout librewolf-bin
+yay -S --needed --noconfirm wlogout
 
 echo
 echo "=================================================================="
