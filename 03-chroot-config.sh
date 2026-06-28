@@ -3,11 +3,6 @@
 # 03-chroot-config.sh
 # Se ejecuta DENTRO de arch-chroot (después de 02-bootstrap.sh).
 # Asume arranque UEFI (no BIOS legacy).
-#
-# Este script monta el SISTEMA: locale, hostname, usuario, cifrado,
-# bootloader, snapshots. NO toca configuración de escritorio (eso no
-# vive en este repo): Hyprland/waybar/rofi/zsh/etc. se aplican después
-# del primer arranque, en 04-post-install.sh, vía chezmoi.
 
 set -euo pipefail
 
@@ -20,25 +15,11 @@ read -rp "Zona horaria (ej: Europe/Madrid): " TZ_REGION
 ln -sf "/usr/share/zoneinfo/${TZ_REGION}" /etc/localtime
 hwclock --systohc
 
-# ---- Idioma / Locale ----
-# Preguntamos el idioma del sistema (LANG), pero las carpetas de
-# usuario (Desktop, Downloads...) más abajo se dejan en inglés SIEMPRE,
-# sea cual sea el idioma elegido aquí — son cosas independientes.
-read -rp "Idioma del sistema, formato locale (ej: es_ES, en_US, fr_FR) [es_ES]: " SYS_LANG
-SYS_LANG="${SYS_LANG:-es_ES}"
-
-# en_US.UTF-8 se genera siempre como base/fallback (muchas herramientas
-# lo asumen disponible), y además el que hayas elegido si es distinto.
+# ---- Locale ----
 sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
-if [ "$SYS_LANG" != "en_US" ]; then
-    if ! grep -q "^${SYS_LANG}.UTF-8 UTF-8" /etc/locale.gen; then
-        echo "ADVERTENCIA: ${SYS_LANG}.UTF-8 no aparece en /etc/locale.gen."
-        echo "Revisa que el locale exista (ver /etc/locale.gen) y vuelve a lanzar este script si falla."
-    fi
-    sed -i "s/^#${SYS_LANG}.UTF-8 UTF-8/${SYS_LANG}.UTF-8 UTF-8/" /etc/locale.gen
-fi
+sed -i 's/^#es_ES.UTF-8 UTF-8/es_ES.UTF-8 UTF-8/' /etc/locale.gen
 locale-gen
-echo "LANG=${SYS_LANG}.UTF-8" > /etc/locale.conf
+echo "LANG=es_ES.UTF-8" > /etc/locale.conf
 
 # ---- Hostname ----
 read -rp "Hostname para este equipo: " HOSTNAME
@@ -60,18 +41,17 @@ passwd
 
 # ---- Usuario normal ----
 read -rp "Nombre de usuario a crear: " USERNAME
-useradd -m -G wheel -s /bin/bash "$USERNAME"
+useradd -m -G wheel -s /usr/bin/zsh "$USERNAME"
 echo "Establece la contraseña de $USERNAME:"
 passwd "$USERNAME"
 
 # Habilitar sudo para el grupo wheel
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-# Mover los scripts de instalación de root a la home del usuario nuevo
-# (para poder correr 04-post-install.sh tras el primer arranque)
-if [ -d /root/arch-install-scripts ]; then
-    cp -r /root/arch-install-scripts "/home/${USERNAME}/arch-install-scripts"
-    chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/arch-install-scripts"
+# Mover los dotfiles/scripts de root a la home del usuario nuevo
+if [ -d /root/arch-hyprland-installer ]; then
+    cp -r /root/arch-hyprland-installer "/home/${USERNAME}/arch-hyprland-installer"
+    chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/arch-hyprland-installer"
 fi
 
 # ---- Cifrado de disco: detectar el contenedor LUKS ya abierto como "cryptroot" ----
@@ -123,7 +103,7 @@ GRUB_TERMINAL_INPUT="console"
 #GRUB_TERMINAL_OUTPUT=console
 
 # The resolution used on graphical terminal
-GRUB_GFXMODE=2560x1440,auto
+GRUB_GFXMODE=auto
 
 # Uncomment to allow the kernel use the same resolution used by grub
 GRUB_GFXPAYLOAD_LINUX="keep"
@@ -133,47 +113,73 @@ GRUB_GFXPAYLOAD_LINUX="keep"
 # Uncomment to disable generation of recovery mode menu entries
 GRUB_DISABLE_RECOVERY="true"
 
-# Colores del menú
-export GRUB_COLOR_NORMAL="light-blue/black"
-export GRUB_COLOR_HIGHLIGHT="light-cyan/blue"
-
-# Tema Particle-window
-GRUB_BACKGROUND="/usr/share/grub/themes/Particle-window/background.jpg"
-GRUB_THEME="/usr/share/grub/themes/Particle-window/theme.txt"
-
-#GRUB_INIT_TUNE="480 440 1"
-#GRUB_SAVEDEFAULT="true"
-#GRUB_DISABLE_SUBMENU="y"
-
-# Sin dual-boot, no necesitamos os-prober, pero lo dejamos igual que
-# tenías por si en el futuro añades otro sistema:
 GRUB_DISABLE_OS_PROBER="false"
 GRUBEOF
 
 # Sustituir el placeholder del UUID LUKS por el valor real detectado arriba
 sed -i "s/__LUKS_UUID__/${LUKS_UUID}/" /etc/default/grub
 
-# ---- Tema Particle-window (yeyushengfan258/Particle-grub-theme) ----
-# Instalado SIN el flag -b, para que quede en /usr/share/grub/themes/
-# (coincide con las rutas de GRUB_BACKGROUND/GRUB_THEME de arriba).
-# -s 2k porque tu GRUB_GFXMODE es 2560x1440.
-git clone https://github.com/yeyushengfan258/Particle-grub-theme.git /tmp/particle-theme
-(cd /tmp/particle-theme && ./install.sh -t window -s 2k)
-rm -rf /tmp/particle-theme
+# ---- Tema visual de GRUB (opcional) ----
+echo
+read -rp "¿Instalar un tema visual para GRUB (Particle-window)? [s/N]: " GRUB_THEME_YN
+if [[ "$GRUB_THEME_YN" =~ ^[sS]$ ]]; then
+    read -rp "Resolución de tu pantalla para el tema (ej: 2560x1440, o 'auto'): " GRUB_RES
+    GRUB_RES="${GRUB_RES:-auto}"
+
+    # Mapear resolución a la opción -s del instalador del tema (acepta
+    # 2k/4k/etc; si no coincide con nada conocido, usa "2k" por defecto)
+    case "$GRUB_RES" in
+        *3840*|*4k*|*4K*) THEME_SIZE="4k" ;;
+        *) THEME_SIZE="2k" ;;
+    esac
+
+    sed -i "s/^GRUB_GFXMODE=auto/GRUB_GFXMODE=${GRUB_RES},auto/" /etc/default/grub
+    cat >> /etc/default/grub << EOF
+
+# Tema Particle-window
+GRUB_BACKGROUND="/usr/share/grub/themes/Particle-window/background.jpg"
+GRUB_THEME="/usr/share/grub/themes/Particle-window/theme.txt"
+EOF
+
+    git clone https://github.com/yeyushengfan258/Particle-grub-theme.git /tmp/particle-theme
+    (cd /tmp/particle-theme && ./install.sh -t window -s "$THEME_SIZE")
+    rm -rf /tmp/particle-theme
+fi
 
 grub-mkconfig -o /boot/grub/grub.cfg
 
+# ---- Dotfiles vía chezmoi (opcional, repo de cada persona) ----
+USER_HOME="/home/${USERNAME}"
+mkdir -p "${USER_HOME}/Pictures/wallpapers"
+chown -R "${USERNAME}:${USERNAME}" "${USER_HOME}/Pictures"
+
+echo
+echo "Si tienes un repositorio de dotfiles gestionado con chezmoi, dame"
+echo "la URL (ej: https://github.com/tu-usuario/dotfiles.git o un path"
+echo "local). Déjalo vacío si quieres un Hyprland limpio sin dotfiles."
+read -rp "URL del repo de dotfiles (opcional): " DOTFILES_URL
+
+if [ -n "$DOTFILES_URL" ]; then
+    su - "${USERNAME}" -c "chezmoi init --apply '${DOTFILES_URL}'"
+
+    # Convención: si el repo de dotfiles trae un install-packages.sh en
+    # su raíz, es el lugar donde cada persona pone SUS paquetes (AUR
+    # incluido) — este instalador genérico no asume nada sobre eso.
+    INSTALL_PKGS="${USER_HOME}/.local/share/chezmoi/install-packages.sh"
+    if [ -f "$INSTALL_PKGS" ]; then
+        echo
+        echo "Encontrado install-packages.sh en tu repo de dotfiles."
+        echo "Se ejecutará en el paso 4 (04-post-install.sh), como tu"
+        echo "usuario normal — necesita una sesión real para AUR/yay."
+    fi
+else
+    echo "Sin dotfiles — Hyprland queda con su configuración por defecto."
+fi
+
 # ---- Carpetas de usuario en inglés (Downloads, Documents, etc.) ----
 # Se escriben a mano en vez de depender de xdg-user-dirs-update, para
-# que queden en inglés SIEMPRE — sin importar qué LANG se haya elegido
-# arriba (es_ES, fr_FR, lo que sea). xdg-user-dirs-update traduciría
-# estos nombres según el locale; aquí los fijamos a propósito.
-# Esto es independiente de chezmoi: son carpetas estándar de cualquier
-# escritorio, no "dotfiles" gestionados por el repo de chezmoi.
-USER_HOME="/home/${USERNAME}"
+# que queden en inglés sin importar el locale del sistema (es_ES).
 mkdir -p "$USER_HOME"/{Desktop,Downloads,Templates,Public,Documents,Music,Pictures,Videos}
-mkdir -p "$USER_HOME/Pictures/wallpapers"
-mkdir -p "$USER_HOME/.config"
 cat > "$USER_HOME/.config/user-dirs.dirs" << 'EOF'
 XDG_DESKTOP_DIR="$HOME/Desktop"
 XDG_DOWNLOAD_DIR="$HOME/Downloads"
@@ -189,6 +195,14 @@ chown -R "${USERNAME}:${USERNAME}" "$USER_HOME"
 
 # ---- Display manager ----
 systemctl enable sddm
+
+# Auto-desbloquear gnome-keyring con la misma contraseña de login (SDDM),
+# para que apps como gnome-calendar no vuelvan a pedir la contraseña
+# del keyring por separado cada vez.
+if ! grep -q pam_gnome_keyring /etc/pam.d/sddm 2>/dev/null; then
+    sed -i '/^auth.*include.*system-login/a auth       optional     pam_gnome_keyring.so' /etc/pam.d/sddm
+    sed -i '/^session.*include.*system-login/a session    optional     pam_gnome_keyring.so auto_start' /etc/pam.d/sddm
+fi
 
 # ---- Bluetooth ----
 systemctl enable bluetooth
@@ -236,8 +250,8 @@ fi
 
 echo
 echo "=================================================================="
-echo "  Configuración de sistema completa: usuario, cifrado, bootloader,"
-echo "  snapshots y servicios base ya están listos."
+echo "  Configuración completa. Hyprland, SDDM y todos los dotfiles ya"
+echo "  están listos para el primer arranque."
 echo
 echo "  Sal del chroot, desmonta y reinicia:"
 echo "    exit"
@@ -245,13 +259,8 @@ echo "    umount -R /mnt"
 echo "    reboot"
 echo
 echo "  Tras reiniciar, inicia sesión gráfica en SDDM con tu usuario"
-echo "  ($USERNAME) y elige la sesión Hyprland. Verás el Hyprland de"
-echo "  FÁBRICA (sin tu configuración todavía) — sirve para abrir una"
-echo "  terminal (SUPER+Return por defecto) y seguir desde ahí."
-echo
-echo "  Una vez dentro, corre:"
-echo "    cd ~/arch-install-scripts"
-echo "    ./04-post-install.sh git@github.com:USUARIO/dotfiles.git"
-echo "  Eso instala yay/wlogout, oh-my-zsh, y aplica TODOS tus dotfiles"
-echo "  reales (Hyprland, waybar, rofi, zsh...) vía chezmoi."
+echo "  ($USERNAME) y elige la sesión Hyprland. Todo debería funcionar"
+echo "  YA, salvo wlogout (viene de AUR, requiere usuario normal real"
+echo "  para compilar) — corre ./04-post-install.sh una vez dentro para"
+echo "  completar eso."
 echo "=================================================================="

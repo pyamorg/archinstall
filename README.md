@@ -1,136 +1,86 @@
-# archinstall — instalador Arch Linux + Hyprland
+# Arch + Hyprland — instalador genérico
 
-## Arquitectura: dos repos, dos responsabilidades
+Instala Arch Linux desde cero con Hyprland, cifrado de disco (LUKS2 +
+desbloqueo TPM2 con passphrase de respaldo), Btrfs con snapshots
+automáticos (snapper), GRUB, y un Hyprland mínimo y funcional.
 
-Este repo (`arch-install-scripts`) **solo monta el sistema**: disco,
-cifrado, paquetes base, usuario, bootloader, snapshots. **No contiene
-dotfiles.**
-
-Toda la configuración de escritorio (Hyprland, waybar, rofi, dunst,
-kitty, qt5ct/qt6ct, gtk, btop, zsh...) vive en un repo separado
-gestionado con [chezmoi](https://www.chezmoi.io/):
-
-```
-git@github.com:pyamorg/dotfiles.git
-```
-
-¿Por qué separarlos? Porque son ciclos de vida distintos: el sistema
-se monta una vez por máquina; los dotfiles cambian todo el rato y
-quieres poder iterar sobre ellos (y aplicarlos en otras máquinas) sin
-tocar el instalador. Mantenerlos juntos en un solo repo acababa
-duplicando los mismos archivos en dos sitios y desincronizándose.
+**No asume nada sobre tus preferencias personales.** Si tienes un repo
+de dotfiles gestionado con [chezmoi](https://www.chezmoi.io/), el
+instalador te pide la URL en el paso 3 y lo aplica automáticamente —
+si tu repo de dotfiles trae un `install-packages.sh` en su raíz, también
+se ejecuta solo, en el paso 4.
 
 ## Orden de ejecución
 
-```
-01-partition.sh        (ISO live)     particiona, cifra, formatea, monta
-02-bootstrap.sh        (ISO live)     pacstrap del sistema base + paquetes
-   |
-   v  arch-chroot /mnt
-03-chroot-config.sh    (chroot)       locale, usuario, cifrado, GRUB, snapper
-   |
-   v  exit; umount -R /mnt; reboot
-   |
-   (primer login en SDDM -> sesión Hyprland DE FÁBRICA, sin tu config)
-   |
-   v  abre una terminal (SUPER+Return por defecto) y entra a tu home
-04-post-install.sh     (usuario normal, tras 1er arranque)
-                        yay + AUR (wlogout)
-                        oh-my-zsh + zsh como shell por defecto
-                        chezmoi init --apply <tu repo>  <- AQUÍ llega
-                        tu Hyprland/waybar/rofi/zsh REALES, y aquí
-                        mismo chezmoi te pregunta qué layout/variante
-                        de teclado usar (ver chezmoi.toml.tmpl en el
-                        repo de dotfiles)
-                        dconf (modo oscuro)
-```
-
-Después de `04-post-install.sh`, corre `hyprctl reload` (o cierra
-sesión y vuelve a entrar) para que el escritorio tome toda tu config.
-
-`snap-now.sh` es independiente del flujo anterior: es un atajo para
-tomar un snapshot manual de snapper en cualquier momento
-(`./snap-now.sh "antes de tocar el kernel"`).
-
-## Configuración adicional que vive solo en el repo de chezmoi
-
-Estas piezas NO están en este repo (serían duplicación) — viven ya
-aplicadas en `pyamorg/dotfiles`:
-
-- **`.chezmoi.toml.tmpl`**: pregunta el layout/variante de teclado
-  (XKB) en cada `chezmoi init` nuevo, en vez de asumir un valor fijo
-  en `hyprland.conf`. Vacío en la pregunta de variante = qwerty
-  normal.
-- **`.chezmoiscripts/run_onchange_firefox-policies.sh`**: aplica
-  `/etc/firefox/policies/policies.json` (buscador, extensiones
-  forzadas, telemetría desactivada...) durante `chezmoi apply`.
-
-Si alguna vez arrancas un repo de dotfiles desde cero en otra máquina,
-recréalas ahí — no las copies de vuelta a este repo.
-
-## Primera vez: el repo de dotfiles está vacío
-
-Si todavía no has subido nada a `pyamorg/dotfiles`, hazlo una vez
-desde una máquina que ya tenga tu configuración actual (típicamente,
-tu instalación de referencia):
+| # | Script | Dónde |
+|---|--------|-------|
+| 1 | `01-partition.sh` | ISO live — particiona, cifra (LUKS2), Btrfs+subvolúmenes |
+| 2 | `02-bootstrap.sh` | ISO live — pacstrap del sistema base + Hyprland mínimo |
+| 3 | `03-chroot-config.sh` | Dentro de `arch-chroot` — usuario, GRUB, snapper, TPM2, **tus dotfiles (opcional)** |
+| 4 | `04-post-install.sh` | Usuario normal, post-reboot — yay + **tu `install-packages.sh` (opcional)** |
 
 ```bash
-# 0. Clave SSH para GitHub, si no la tienes ya en esta máquina
-ls ~/.ssh/id_ed25519.pub 2>/dev/null || ssh-keygen -t ed25519 -C "tu_email@ejemplo.com"
-cat ~/.ssh/id_ed25519.pub        # pégala en https://github.com/settings/keys
-ssh -T git@github.com            # debe saludarte por tu usuario
+chmod +x *.sh
+./01-partition.sh
+./02-bootstrap.sh
 
-# 1. Inicializar chezmoi (repo vacío, sin --apply)
-chezmoi init git@github.com:pyamorg/dotfiles.git
+arch-chroot /mnt
+cd /root/arch-hyprland-installer
+chmod +x *.sh
+./03-chroot-config.sh
+# Aquí te pregunta la URL de tu repo de dotfiles (opcional)
 
-# 2. Añadir tu config actual al source state de chezmoi
-chezmoi add ~/.config/hypr
-chezmoi add ~/.config/waybar
-chezmoi add ~/.config/rofi
-chezmoi add ~/.config/wlogout
-chezmoi add ~/.config/dunst
-chezmoi add ~/.config/kitty
-chezmoi add ~/.config/qt5ct
-chezmoi add ~/.config/qt6ct
-chezmoi add ~/.config/xdg-desktop-portal
-chezmoi add ~/.config/gtk-3.0
-chezmoi add ~/.config/gtk-4.0
-chezmoi add ~/.config/btop/btop.conf
-chezmoi add ~/.config/btop/btop-overrides.conf
-chezmoi add ~/.gtkrc-2.0
-chezmoi add ~/.zshrc
-
-# 3. Marcar como ejecutable el script de la terminal quake (chezmoi
-#    necesita esto explícito para preservar el permiso al aplicar)
-chezmoi chattr +executable ~/.config/hypr/scripts/quake-terminal.sh
-
-# 4. Commit y push
-chezmoi cd
-git add -A
-git commit -m "Primer commit: dotfiles iniciales"
-git push -u origin main      # o "master", según la rama por defecto
 exit
+umount -R /mnt
+reboot
 ```
 
-A partir de aquí, cualquier instalación nueva que corra
-`04-post-install.sh` ya recibe todo esto automáticamente.
-
-## Editar los dotfiles después
-
+Tras el primer arranque (SDDM → Hyprland):
 ```bash
-chezmoi edit ~/.config/hypr/hyprland.conf   # abre el .tmpl correspondiente
-chezmoi diff                                 # qué cambiaría al aplicar
-chezmoi apply                                # aplica al sistema real
-chezmoi cd && git add -A && git commit -m "..." && git push && exit
+cd ~/arch-hyprland-installer
+./04-post-install.sh
 ```
 
-## Variables de `04-post-install.sh`
+## Cómo enganchar TU repo de dotfiles
 
+1. Tu repo de dotfiles debe ser un source de chezmoi normal (carpeta con
+   `dot_config/`, `.chezmoi.toml.tmpl` si usas variables, etc.).
+2. Opcionalmente, pon un `install-packages.sh` ejecutable en la raíz de
+   ESE repo (no en este) con tus paquetes personales — oficiales y AUR.
+   Lo detecta y ejecuta solo `04-post-install.sh`.
+3. Al correr `03-chroot-config.sh`, dale la URL (HTTPS de GitHub/GitLab,
+   o un path local si lo tienes en un USB).
+
+Ejemplo de `install-packages.sh` (plantilla incluida en este repo como
+`install-packages.sh.PARA-TU-OTRO-REPO` — cópialo a la raíz de tu repo
+de dotfiles, sin la extensión, y ajústalo a tus paquetes reales).
+
+## Cifrado de disco
+
+LUKS2 en la partición raíz (la EFI queda sin cifrar). Desbloqueo por
+TPM2 si tu hardware lo soporta, con passphrase de respaldo siempre
+activa. **Guarda la passphrase en un sitio seguro** — sin ella no hay
+recuperación posible.
+
+## Snapshots (Snapper)
+
+Subvolúmenes `@`, `@home`, `@snapshots`, `@var_log`, `@pkg`. Snapshots
+automáticos en cada operación de pacman (`snap-pac`) y cada hora.
 ```bash
-./04-post-install.sh                                   # usa el repo por defecto
-./04-post-install.sh git@github.com:otro/repo.git       # repo distinto, por argumento
-DOTFILES_REPO="git@github.com:otro/repo.git" ./04-post-install.sh  # por variable
+sudo snapper -c root list
+sudo snapper -c root undochange <N>..0
 ```
+`./snap-now.sh "descripción"` para un snapshot manual rápido.
 
-El valor por defecto está en `DOTFILES_REPO_DEFAULT` dentro del propio
-script.
+## GRUB
+
+Se te pregunta si quieres el tema visual **Particle-window**
+([yeyushengfan258/Particle-grub-theme](https://github.com/yeyushengfan258/Particle-grub-theme))
+y a qué resolución. Si dices que no, GRUB queda con su aspecto por
+defecto.
+
+## ⚠️ Sobre `01-partition.sh`
+
+Borra por completo el disco que le indiques. Pide el nombre dos veces
+y una palabra de confirmación exacta — aun así, revisa con `lsblk`
+antes de correrlo.
