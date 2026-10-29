@@ -40,7 +40,7 @@ pacstrap -K /mnt \
     ttf-jetbrains-mono-nerd noto-fonts noto-fonts-emoji papirus-icon-theme \
     dconf xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
     gnome-themes-extra xdg-user-dirs \
-    btop sddm firefox
+    btop sddm firefox zsh
 
 echo "--> Generando fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
