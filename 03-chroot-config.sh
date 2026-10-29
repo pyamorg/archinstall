@@ -224,18 +224,19 @@ systemctl enable bluetooth
 systemctl enable NetworkManager
 
 # ---- Snapper: snapshots automáticos del subvolumen raíz ----
-# snap-pac crea un snapshot antes/después de cada operación de pacman,
-# y se pueden tomar snapshots manuales en cualquier momento.
-umount /.snapshots
-rm -rf /.snapshots
-snapper -c root create-config /
-btrfs subvolume delete /.snapshots
-mkdir /.snapshots
-mount -a
-snapper -c root set-config "TIMELINE_CREATE=yes"
-snapper -c root set-config "TIMELINE_CLEANUP=yes"
-snapper -c root set-config "TIMELINE_LIMIT_HOURLY=6"
-snapper -c root set-config "TIMELINE_LIMIT_DAILY=7"
+# --no-dbus: en el chroot no hay D-Bus, snapper actúa directamente.
+if ! snapper --no-dbus -c root get-config &>/dev/null; then
+    umount /.snapshots 2>/dev/null || true
+    rm -rf /.snapshots
+    snapper --no-dbus -c root create-config /
+    btrfs subvolume delete /.snapshots
+    mkdir /.snapshots
+    mount -a
+fi
+snapper --no-dbus -c root set-config "TIMELINE_CREATE=yes"
+snapper --no-dbus -c root set-config "TIMELINE_CLEANUP=yes"
+snapper --no-dbus -c root set-config "TIMELINE_LIMIT_HOURLY=6"
+snapper --no-dbus -c root set-config "TIMELINE_LIMIT_DAILY=7"
 systemctl enable snapper-timeline.timer
 systemctl enable snapper-cleanup.timer
 
