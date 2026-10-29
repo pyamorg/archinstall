@@ -41,7 +41,12 @@ passwd
 
 # ---- Usuario normal ----
 read -rp "Nombre de usuario a crear: " USERNAME
-useradd -m -G wheel -s /usr/bin/zsh "$USERNAME"
+if id "$USERNAME" &>/dev/null; then
+    echo "El usuario $USERNAME ya existe, se reutiliza."
+    usermod -aG wheel -s /usr/bin/zsh "$USERNAME"
+else
+    useradd -m -G wheel -s /usr/bin/zsh "$USERNAME"
+fi
 echo "Establece la contraseña de $USERNAME:"
 passwd "$USERNAME"
 
@@ -160,11 +165,19 @@ echo "local). Déjalo vacío si quieres un Hyprland limpio sin dotfiles."
 read -rp "URL del repo de dotfiles (opcional): " DOTFILES_URL
 
 if [ -n "$DOTFILES_URL" ]; then
-    su - "${USERNAME}" -c "chezmoi init --apply '${DOTFILES_URL}'"
+    # sudo sin contraseña SOLO durante chezmoi (se elimina siempre al salir)
+    SUDOERS_TMP="/etc/sudoers.d/99-installer-nopasswd"
+    echo "${USERNAME} ALL=(ALL:ALL) NOPASSWD: ALL" > "$SUDOERS_TMP"
+    chmod 440 "$SUDOERS_TMP"
+    trap 'rm -f "$SUDOERS_TMP"' EXIT
 
-    # Convención: si el repo de dotfiles trae un install-packages.sh en
-    # su raíz, es el lugar donde cada persona pone SUS paquetes (AUR
-    # incluido) — este instalador genérico no asume nada sobre eso.
+    su - "${USERNAME}" -c "chezmoi init --apply '${DOTFILES_URL}'" || {
+        echo "AVISO: chezmoi falló; revisa el error de arriba y reintenta tras el primer arranque."
+    }
+
+    rm -f "$SUDOERS_TMP"
+    trap - EXIT
+
     INSTALL_PKGS="${USER_HOME}/.local/share/chezmoi/install-packages.sh"
     if [ -f "$INSTALL_PKGS" ]; then
         echo
