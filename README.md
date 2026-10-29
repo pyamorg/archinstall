@@ -37,6 +37,7 @@ reboot
 
 Tras el primer arranque (SDDM → Hyprland):
 ```bash
+nmcli device wifi connect 'SSID' password 'password'
 cd ~/arch-hyprland-installer
 ./04-post-install.sh
 ```
